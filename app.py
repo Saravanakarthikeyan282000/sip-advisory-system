@@ -89,7 +89,9 @@ def calculate_12m_forecast_sip(amc, scheme, monthly_sip):
     return units * final_nav
 
 def generate_bell_curve(curr_data, title_text="Probability Distribution", color_code='#00FFFF'):
-    """Generates a single Bell Curve with 3 Distinct Dots (P10, P50, P90)."""
+    """
+    Generates a single Bell Curve with 3 Distinct Dots (P10, P50, P90).
+    """
     fig = go.Figure()
 
     # Data
@@ -140,31 +142,6 @@ def generate_bell_curve(curr_data, title_text="Probability Distribution", color_
         showlegend=False,
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)'
-    )
-    return fig
-
-def generate_waterfall_chart(current_val, gain, optimized_val):
-    """Generates a professional Waterfall chart for Value Creation."""
-    fig = go.Figure(go.Waterfall(
-        name = "20", orientation = "v",
-        measure = ["relative", "relative", "total"],
-        x = ["Current Portfolio", "Rebalancing Gain", "Optimized Portfolio"],
-        textposition = "outside",
-        text = [f"{current_val/1000:.1f}k", f"+{gain/1000:.1f}k", f"{optimized_val/1000:.1f}k"],
-        y = [current_val, gain, optimized_val],
-        connector = {"line":{"color":"rgb(63, 63, 63)"}},
-        decreasing = {"marker":{"color":"#FF4B4B"}},
-        increasing = {"marker":{"color":"#00FFFF"}}, # Cyan for gain
-        totals = {"marker":{"color":"#2ecc71"}}       # Green for final
-    ))
-
-    fig.update_layout(
-        title = "Value Creation Bridge",
-        template="plotly_dark",
-        showlegend = False,
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        height=350
     )
     return fig
 
@@ -280,10 +257,7 @@ elif page == "Existing Portfolio Rebalancing":
         st.divider()
         st.subheader("Rebalancing Analysis Report")
         
-        summary_table_data = [] 
-        total_current_val = 0
-        total_optimized_val = 0
-        total_invested = 0
+        summary_table_data = [] # For final display
         
         for fund in user_portfolio:
             # 1. FETCH CURRENT FUND DATA
@@ -330,10 +304,6 @@ elif page == "Existing Portfolio Rebalancing":
                 action_color = "#00FFFF" # Cyan success
                 gain = 0 # No gain if holding
 
-            total_invested += invested
-            total_current_val += c_p50
-            total_optimized_val += b_p50
-
             # 4. DISPLAY: Holding Header
             st.markdown(f"#### Holding #{fund['id']}: {fund['Scheme']} - {fund['AMC']}")
             
@@ -353,12 +323,12 @@ elif page == "Existing Portfolio Rebalancing":
                 st.plotly_chart(generate_bell_curve(curr_data, title_text=f"Current: {fund['AMC']}", color_code=graph_color), use_container_width=True)
                 
             with col_g2:
-                # Recommended Graph (Always Green) - Only show if different
+                # Recommended Graph (Always Cyan/Green) - Only show if different
                 if action == "REBALANCE":
                     rec_data = {'AMC': best_amc, 'P50': b_p50, 'P10': b_p10, 'P90': b_p90}
                     st.plotly_chart(generate_bell_curve(rec_data, title_text=f"Proposed: {best_amc}", color_code='#00FF00'), use_container_width=True)
                 else:
-                    st.success("Analysis confirms this is the optimal fund for this category.")
+                    st.info("Your current fund is the top performer in this category.")
 
             st.markdown("---")
 
@@ -372,25 +342,18 @@ elif page == "Existing Portfolio Rebalancing":
                 "Potential Gain": format_currency(gain)
             })
 
-        # 6. FINAL SUMMARY SECTION WITH GRAPHICS
-        st.subheader("Consolidated Portfolio Report")
-        
-        # Summary Table
+        # 6. FINAL SUMMARY TABLE
+        st.subheader("Final Portfolio Summary")
         if summary_table_data:
             summary_df = pd.DataFrame(summary_table_data)
             st.dataframe(summary_df, use_container_width=True)
-
-        # TOTAL GAIN GRAPHIC (WATERFALL)
-        st.subheader("Value Creation Analysis")
-        total_gain = total_optimized_val - total_current_val
-        st.plotly_chart(generate_waterfall_chart(total_current_val, total_gain, total_optimized_val), use_container_width=True)
             
-        # Download Button
-        csv = convert_df_to_csv(summary_df)
-        st.download_button(
-            label="DOWNLOAD REPORT (CSV)",
-            data=csv,
-            file_name='portfolio_rebalancing_report.csv',
-            mime='text/csv',
-            type="primary"
-        )
+            # Download Button
+            csv = convert_df_to_csv(summary_df)
+            st.download_button(
+                label="DOWNLOAD REPORT (CSV)",
+                data=csv,
+                file_name='portfolio_rebalancing_report.csv',
+                mime='text/csv',
+                type="primary"
+            )
