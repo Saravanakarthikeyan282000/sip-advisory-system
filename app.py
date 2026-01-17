@@ -45,13 +45,19 @@ def load_data():
         mc_results = pd.read_excel("26_Monte_Carlo_EWMA_Results.xlsx")
         forecasts = pd.read_excel("13_Forecasted_Fund_NAV.xlsx")
         
-        # Clean Strings
+        # Standardize Strings
         rankings.columns = rankings.columns.str.strip()
         mc_results.columns = mc_results.columns.str.strip()
         forecasts.columns = forecasts.columns.str.strip()
+        
+        # --- CRITICAL: FORCE INTEGER TYPES FOR ACCURATE LOOKUP ---
+        # This prevents "5000" (text) vs 5000 (number) mismatches
+        mc_results['SIP_Amount'] = pd.to_numeric(mc_results['SIP_Amount'], errors='coerce').fillna(0).astype(int)
+        mc_results['Tenure_Months'] = pd.to_numeric(mc_results['Tenure_Months'], errors='coerce').fillna(0).astype(int)
+        
         forecasts['Date'] = pd.to_datetime(forecasts['Date'])
         
-        # Purge Exclusions
+        # Remove Exclusions
         for amc, scheme in EXCLUDED_PAIRS:
             rankings = rankings[~((rankings['AMC'] == amc) & (rankings['Scheme'] == scheme))]
             mc_results = mc_results[~((mc_results['AMC'] == amc) & (mc_results['Scheme'] == scheme))]
@@ -80,8 +86,7 @@ def calculate_12m_forecast_sip(amc, scheme, monthly_sip):
     units = 0
     for nav in monthly_data['Forecast_NAV']:
         units += monthly_sip / nav
-    final_nav = monthly_data.iloc[-1]['Forecast_NAV']
-    return units * final_nav
+    return units * monthly_data.iloc[-1]['Forecast_NAV']
 
 def generate_bell_curve(curr_data, title_text="Probability Distribution", color_code='#00FFFF'):
     fig = go.Figure()
@@ -158,24 +163,23 @@ if page == "New Investment Analysis":
                     st.markdown("---")
 
 # =========================================================
-# MODULE 2: EXISTING PORTFOLIO REBALANCING (CORRECTED LOOP)
+# MODULE 2: EXISTING PORTFOLIO REBALANCING
 # =========================================================
 elif page == "Existing Portfolio Rebalancing":
     st.title("Existing Portfolio Rebalancing")
-    st.markdown("Comparative analysis: Checks if a better performing fund exists for your parameters.")
+    st.markdown("Comparative analysis: Checks if a better performing fund exists for your exact parameters.")
     if df_mc.empty: st.stop()
 
     num_funds = st.number_input("Number of Holdings", min_value=1, max_value=20, step=1, value=1)
     user_portfolio = []
     
     st.subheader("Portfolio Composition")
-    # NO FORM - DYNAMIC UPDATES
     for i in range(num_funds):
         with st.expander(f"Holding #{i+1}", expanded=True):
             c1, c2, c3, c4 = st.columns(4)
             sch = c1.selectbox("Scheme", sorted(df_mc['Scheme'].unique()), key=f"s_{i}")
             
-            # Dynamic Filter
+            # Dynamic Filter: Only valid AMCs
             valid_amcs = sorted(df_mc[df_mc['Scheme'] == sch]['AMC'].unique())
             if not valid_amcs:
                 amc = None
@@ -196,27 +200,27 @@ elif page == "Existing Portfolio Rebalancing":
         total_current_val = 0
         total_optimized_val = 0
         
-        # --- LOOP THROUGH EACH HOLDING ---
         for fund in user_portfolio:
-            
-            # 1. CALCULATE CURRENT FUND PERFORMANCE
+            # 1. FETCH CURRENT FUND PERFORMANCE (Use exact Amount/Tenure inputs)
             if fund['Tenure'] == 12:
                 c_p50 = calculate_12m_forecast_sip(fund['AMC'], fund['Scheme'], fund['Amount'])
                 c_p10, c_p90 = c_p50 * 0.95, c_p50 * 1.05
             else:
-                row = df_mc[(df_mc['AMC'] == fund['AMC']) & (df_mc['Scheme'] == fund['Scheme']) & 
-                            (df_mc['SIP_Amount'] == fund['Amount']) & (df_mc['Tenure_Months'] == fund['Tenure'])]
+                row = df_mc[
+                    (df_mc['AMC'] == fund['AMC']) & 
+                    (df_mc['Scheme'] == fund['Scheme']) & 
+                    (df_mc['SIP_Amount'] == int(fund['Amount'])) &    # Strict Integer Match
+                    (df_mc['Tenure_Months'] == int(fund['Tenure']))   # Strict Integer Match
+                ]
                 c_p50 = row.iloc[0]['P50_Corpus'] if not row.empty else 0
                 c_p10 = row.iloc[0]['P10_Corpus'] if not row.empty else 0
                 c_p90 = row.iloc[0]['P90_Corpus'] if not row.empty else 0
 
-            # 2. FIND THE ABSOLUTE BEST FUND FOR THIS SCENARIO
-            # Default to current (in case no better one exists)
+            # 2. FIND THE WINNER (For this specific Scheme + Amount + Tenure)
             best_amc = fund['AMC']
             b_p50, b_p10, b_p90 = c_p50, c_p10, c_p90
             
             if fund['Tenure'] == 12:
-                # Iterate ALL AMCs to find highest Forecast
                 all_candidates = df_forecast[df_forecast['Scheme'] == fund['Scheme']]['AMC'].unique()
                 max_val = c_p50
                 for cand in all_candidates:
@@ -227,19 +231,17 @@ elif page == "Existing Portfolio Rebalancing":
                         b_p50 = val
                         b_p10, b_p90 = val * 0.95, val * 1.05
             else:
-                # Query df_mc for the row with MAX P50_Corpus in this category
-                # This guarantees we find the winner, regardless of what user selected
-                scheme_subset = df_mc[
+                # Filter MC data for ALL AMCs matching this Scheme + Amount + Tenure
+                # This ensures if you change Amount, you get the winner for the NEW amount.
+                cohort = df_mc[
                     (df_mc['Scheme'] == fund['Scheme']) & 
-                    (df_mc['SIP_Amount'] == fund['Amount']) & 
-                    (df_mc['Tenure_Months'] == fund['Tenure'])
+                    (df_mc['SIP_Amount'] == int(fund['Amount'])) & 
+                    (df_mc['Tenure_Months'] == int(fund['Tenure']))
                 ]
-                if not scheme_subset.empty:
-                    # Find the row with the maximum P50 Corpus
-                    best_row_idx = scheme_subset['P50_Corpus'].idxmax()
-                    best_row = scheme_subset.loc[best_row_idx]
-                    
-                    # If that best row has a higher value than current, switch to it
+                
+                if not cohort.empty:
+                    # Find the AMC with the MAX P50 in this specific cohort
+                    best_row = cohort.loc[cohort['P50_Corpus'].idxmax()]
                     if best_row['P50_Corpus'] > c_p50:
                         best_amc = best_row['AMC']
                         b_p50 = best_row['P50_Corpus']
@@ -249,7 +251,7 @@ elif page == "Existing Portfolio Rebalancing":
             # 3. DECISION LOGIC
             gain = b_p50 - c_p50
             
-            if gain > 100 and best_amc != fund['AMC']: # Use 100 buffer to ignore floating point noise
+            if gain > 50 and best_amc != fund['AMC']: 
                 action = "REBALANCE"
                 action_color = "#FF4B4B" 
                 display_best_amc = best_amc
@@ -260,12 +262,12 @@ elif page == "Existing Portfolio Rebalancing":
                 gain = 0
                 display_best_amc = "Not Required"
                 display_gain = "-"
-                b_p50 = c_p50 # Sync values for totals
+                b_p50 = c_p50 
 
             total_current_val += c_p50
             total_optimized_val += b_p50
 
-            # 4. UI CARD
+            # 4. DISPLAY
             st.markdown(f"#### Holding #{fund['id']}: {fund['Scheme']} - {fund['AMC']}")
             c_m1, c_m2, c_m3 = st.columns(3)
             c_m1.metric("Recommendation", action)
