@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import plotly.express as px
 from scipy.stats import norm
 
 # --- PAGE CONFIGURATION ---
@@ -42,6 +43,7 @@ st.markdown("""
         padding: 10px;
         font-weight: bold;
         border-top: 1px solid #464b5c;
+        z-index: 100;
     }
     
     /* Expander Styling */
@@ -50,6 +52,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- CONFIG: EXCLUDED PAIRS ---
+# These pairs will be stripped from the data entirely
 EXCLUDED_PAIRS = [
     ('Mirae', 'Smallcap'), ('Franklin', 'Multicap'), ('DSP', 'Multicap'),
     ('Kotak', 'Pharmafund'), ('HDFC', 'Pharmafund'), ('Mirae', 'Multicap'),
@@ -86,9 +89,9 @@ df_ranks, df_mc, df_forecast = load_data()
 # --- UTILITY FUNCTIONS ---
 def format_currency(value):
     try:
-        if pd.isna(value) or value == "": return "0"
-        return f"{float(value):,.0f}"
-    except: return "0"
+        if pd.isna(value) or value == "": return "₹0"
+        return f"₹{float(value):,.0f}"
+    except: return "₹0"
 
 def calculate_12m_forecast_sip(amc, scheme, monthly_sip):
     subset = df_forecast[(df_forecast['AMC'] == amc) & (df_forecast['Scheme'] == scheme)].sort_values('Date')
@@ -103,9 +106,7 @@ def calculate_12m_forecast_sip(amc, scheme, monthly_sip):
     return units * final_nav
 
 def generate_bell_curve(curr_data, title_text="Probability Distribution", color_code='#00FFFF'):
-    """
-    Generates a single Bell Curve with 3 Distinct Dots (P10, P50, P90).
-    """
+    """Generates a single Bell Curve with 3 Distinct Dots."""
     fig = go.Figure()
 
     # Data
@@ -159,23 +160,6 @@ def generate_bell_curve(curr_data, title_text="Probability Distribution", color_
     )
     return fig
 
-def generate_waterfall_chart(current_val, gain, optimized_val):
-    fig = go.Figure(go.Waterfall(
-        name = "20", orientation = "v",
-        measure = ["relative", "relative", "total"],
-        x = ["Current Portfolio", "Rebalancing Gain", "Optimized Portfolio"],
-        textposition = "outside",
-        text = [f"{current_val/1000:.1f}k", f"+{gain/1000:.1f}k", f"{optimized_val/1000:.1f}k"],
-        y = [current_val, gain, optimized_val],
-        connector = {"line":{"color":"rgb(63, 63, 63)"}},
-        decreasing = {"marker":{"color":"#FF4B4B"}},
-        increasing = {"marker":{"color":"#00FFFF"}},
-        totals = {"marker":{"color":"#2ecc71"}}
-    ))
-    fig.update_layout(title="Value Creation Bridge", template="plotly_dark", showlegend=False, 
-                      plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', height=350)
-    return fig
-
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
@@ -209,7 +193,6 @@ if page == "New Investment Analysis":
             sel_top_n = st.selectbox("Recommendations Count", [1, 2, 3, 4, 5], index=0)
 
     if st.button("RUN ANALYSIS", type="primary"):
-        st.balloons() # Animation on click
         st.divider()
         
         # LOGIC: Filter by Rank
@@ -274,12 +257,12 @@ elif page == "Existing Portfolio Rebalancing":
                 # 1. Select Scheme FIRST
                 sch = c1.selectbox("Scheme", sorted(df_mc['Scheme'].unique()), key=f"s_{i}")
                 
-                # 2. Dynamic AMC Filter: Show ONLY AMCs that exist for the selected scheme
-                # This explicitly prevents selecting non-existing pairs like Mirae*Smallcap
+                # 2. Dynamic AMC Filter
+                # Strict filtering: Only show AMCs that exist for this scheme in the clean data
                 valid_amcs_for_scheme = sorted(df_mc[df_mc['Scheme'] == sch]['AMC'].unique())
                 
                 if not valid_amcs_for_scheme:
-                    st.error(f"No data available for {sch}")
+                    st.error(f"No valid AMCs found for {sch}")
                     amc = None
                 else:
                     amc = c2.selectbox("AMC", valid_amcs_for_scheme, key=f"a_{i}")
@@ -293,7 +276,6 @@ elif page == "Existing Portfolio Rebalancing":
         submitted = st.form_submit_button("ANALYZE & REBALANCE", type="primary")
 
     if submitted:
-        st.balloons() # Animation on click
         st.divider()
         st.subheader("Rebalancing Analysis Report")
         
@@ -337,7 +319,7 @@ elif page == "Existing Portfolio Rebalancing":
             invested = fund['Amount'] * fund['Tenure']
             gain = b_p50 - c_p50
             
-            # STRICT REBALANCE LOGIC
+            # Logic: If Current is NOT the best, and Best offers gain -> Rebalance
             if fund['AMC'] != best_amc and gain > 0:
                 action = "REBALANCE"
                 action_color = "#FF4B4B" # Red warning
@@ -349,8 +331,7 @@ elif page == "Existing Portfolio Rebalancing":
                 gain = 0 
                 display_best_amc = "Not Required"
                 display_gain = "-"
-                # Ensure totals reflect the hold strategy (no optimized gain added, just current)
-                b_p50 = c_p50
+                b_p50 = c_p50 # No optimized value difference if holding
 
             total_invested += invested
             total_current_val += c_p50
@@ -365,11 +346,9 @@ elif page == "Existing Portfolio Rebalancing":
             col_m2.metric("Best Alternative", display_best_amc)
             col_m3.metric("Potential Gain", display_gain)
 
-            # 5. SIDEWAYS GRAPHS (Comparison)
-            # If REBALANCE: Show Side-by-Side
-            # If HOLD: Show ONLY Current
-            
+            # 5. GRAPHS
             if action == "REBALANCE":
+                # Show Comparison Side-by-Side
                 col_g1, col_g2 = st.columns(2)
                 with col_g1:
                     curr_data = {'AMC': fund['AMC'], 'P50': c_p50, 'P10': c_p10, 'P90': c_p90}
@@ -378,10 +357,10 @@ elif page == "Existing Portfolio Rebalancing":
                     rec_data = {'AMC': best_amc, 'P50': b_p50, 'P10': b_p10, 'P90': b_p90}
                     st.plotly_chart(generate_bell_curve(rec_data, title_text=f"Proposed: {best_amc}", color_code='#00FF00'), use_container_width=True)
             else:
-                # Only show one centered graph for HOLD
+                # Show Single Centered Graph
                 curr_data = {'AMC': fund['AMC'], 'P50': c_p50, 'P10': c_p10, 'P90': c_p90}
                 st.plotly_chart(generate_bell_curve(curr_data, title_text=f"Current Performance: {fund['AMC']}", color_code='#00FFFF'), use_container_width=True)
-                st.caption("No rebalancing required. Your fund is performing optimally.")
+                st.caption("No rebalancing required.")
 
             st.markdown("---")
 
@@ -403,10 +382,20 @@ elif page == "Existing Portfolio Rebalancing":
             summary_df = pd.DataFrame(summary_table_data)
             st.dataframe(summary_df, use_container_width=True)
 
-        # TOTAL GAIN GRAPHIC
-        st.subheader("Value Creation Analysis")
-        total_gain = total_optimized_val - total_current_val
-        st.plotly_chart(generate_waterfall_chart(total_current_val, total_gain, total_optimized_val), use_container_width=True)
+        # TOTAL GAIN GRAPHIC (SIMPLE BAR CHART)
+        st.subheader("Wealth Impact Analysis")
+        
+        bar_data = pd.DataFrame({
+            "Portfolio State": ["Current Portfolio", "Optimized Portfolio"],
+            "Value (₹)": [total_current_val, total_optimized_val],
+            "Color": ["#00FFFF", "#2ecc71"]
+        })
+        
+        fig_bar = px.bar(bar_data, x="Portfolio State", y="Value (₹)", text="Value (₹)", 
+                         color="Portfolio State", color_discrete_sequence=["#00FFFF", "#2ecc71"])
+        fig_bar.update_traces(texttemplate='₹%{text:,.0f}', textposition='outside')
+        fig_bar.update_layout(template="plotly_dark", plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', showlegend=False)
+        st.plotly_chart(fig_bar, use_container_width=True)
             
         # Download Button
         csv = convert_df_to_csv(summary_df)
