@@ -92,13 +92,13 @@ if mc_results is not None:
         return fig
 
     # --- 4. STREAMLIT UI ---
-    st.title("🚀 SIP Advisory System")
+    st.title(" SIP Advisory System")
     st.divider()
 
     investor_type = st.sidebar.radio("Investor Profile", ["First-Time Investor", "Existing Investor"])
 
     if investor_type == "First-Time Investor":
-        st.subheader("🎯 Portfolio Configuration Engine")
+        st.subheader(" Portfolio Configuration Engine")
         c1, c2, c3, c4 = st.columns(4)
         with c1: num_amcs = st.selectbox("No of AMCs", [1,2,3,4,5])
         with c2: sip_amt = st.selectbox("SIP Amount (₹)", [500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 15000, 20000], index=2)
